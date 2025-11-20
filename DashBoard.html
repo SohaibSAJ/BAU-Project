@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Traffic Analytics - NetGuardian</title>
+<link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white">
+
+<header class="bg-gray-800 shadow-lg">
+    <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+        <div class="flex items-center space-x-3">
+            <a href="#" class="flex items-center space-x-3">
+                <div class="bg-blue-500 p-2 rounded-lg">
+                    <i data-feather="shield" class="w-6 h-6"></i>
+                </div>
+                <h1 class="text-2xl font-bold">NetGuardian</h1>
+            </a>
+        </div>
+        <nav class="flex space-x-6">
+            <a href="#" class="text-gray-400 hover:text-white transition">Dashboard</a>
+            <a href="#" class="text-gray-400 hover:text-white transition">Packets</a>
+            <a href="#" class="text-gray-400 hover:text-white transition">Alerts</a>
+            <a href="#" class="text-blue-400 font-medium">Analytics</a>
+        </nav>
+    </div>
+</header>
+
+<main class="container mx-auto px-4 py-8">
+
+    <h1 class="text-3xl font-bold mb-6">Traffic Analytics</h1>
+
+    <!-- Key Metrics -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg">
+            <h3 class="text-gray-400">Peak Traffic</h3>
+            <p id="peakTraffic" class="text-2xl font-bold mt-2">--</p>
+        </div>
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg">
+            <h3 class="text-gray-400">Avg Traffic</h3>
+            <p id="avgTraffic" class="text-2xl font-bold mt-2">--</p>
+        </div>
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg">
+            <h3 class="text-gray-400">Top Protocol</h3>
+            <p id="topProtocol" class="text-2xl font-bold mt-2">--</p>
+        </div>
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg">
+            <h3 class="text-gray-400">Top Talker</h3>
+            <p id="topTalker" class="text-2xl font-bold mt-2">--</p>
+        </div>
+    </div>
+
+    <!-- Traffic Over Time -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg">
+            <h2 class="text-xl font-bold mb-4">Traffic Volume Over Time</h2>
+            <canvas id="trafficChart" height="250"></canvas>
+        </div>
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg">
+            <h2 class="text-xl font-bold mb-4">Protocol Distribution</h2>
+            <canvas id="protocolChart" height="250"></canvas>
+        </div>
+    </div>
+
+    <!-- Top Talkers -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg">
+            <h2 class="text-xl font-bold mb-4">Top Source IPs</h2>
+            <div id="topSourcesContainer" class="space-y-4"></div>
+        </div>
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg">
+            <h2 class="text-xl font-bold mb-4">Top Destination IPs</h2>
+            <div id="topDestContainer" class="space-y-4"></div>
+        </div>
+    </div>
+
+</main>
+
+<script>
+feather.replace();
+
+// ---------------- Fetch Key Metrics ----------------
+async function fetchMetrics() {
+    const res = await fetch('/api/alltraffic');
+    const data = await res.json();
+
+    if(data.length == 0) return;
+
+    const packetCounts = data.map(d => d.packet_count);
+    const avgTraffic = Math.round(packetCounts.reduce((a,b)=>a+b,0)/packetCounts.length);
+    const peakTraffic = Math.max(...packetCounts);
+
+    const protocolCounts = {};
+    data.forEach(d => protocolCounts[d.protocol] = (protocolCounts[d.protocol]||0)+1);
+    const topProtocol = Object.keys(protocolCounts).reduce((a,b)=> protocolCounts[a]>protocolCounts[b]?a:b);
+
+    const topTalkerObj = data.reduce((a,b)=> a.packet_count>b.packet_count?a:b);
+
+    document.getElementById('peakTraffic').innerText = peakTraffic + ' packets';
+    document.getElementById('avgTraffic').innerText = avgTraffic + ' packets';
+    document.getElementById('topProtocol').innerText = topProtocol;
+    document.getElementById('topTalker').innerText = topTalkerObj.source_mac;
+}
+
+// ---------------- Top Sources ----------------
+async function fetchTopSources() {
+    const res = await fetch('/api/alltraffic');
+    const data = await res.json();
+    const container = document.getElementById('topSourcesContainer');
+    container.innerHTML = '';
+    const topSources = data.sort((a,b)=>b.packet_count-a.packet_count).slice(0,5);
+    topSources.forEach(item => {
+        const div = document.createElement('div');
+        div.innerHTML = `
+            <div class="flex justify-between mb-1">
+                <span>${item.source_mac}</span>
+                <span>${item.packet_count} packets</span>
+            </div>
+            <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full" style="width: ${Math.min(item.packet_count,100)}%"></div>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+// ---------------- Top Destinations ----------------
+async function fetchTopDest() {
+    const res = await fetch('/api/alltraffic');
+    const data = await res.json();
+    const container = document.getElementById('topDestContainer');
+    container.innerHTML = '';
+    const topDest = data.sort((a,b)=>b.packet_count-a.packet_count).slice(0,5);
+    topDest.forEach(item => {
+        const div = document.createElement('div');
+        div.innerHTML = `
+            <div class="flex justify-between mb-1">
+                <span>${item.dest_ip}</span>
+                <span>${item.packet_count} packets</span>
+            </div>
+            <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div class="h-full bg-green-500 rounded-full" style="width: ${Math.min(item.packet_count,100)}%"></div>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+// ---------------- Traffic Chart ----------------
+let trafficChartInstance;
+async function fetchTrafficChart() {
+    const res = await fetch('/api/alltraffic');
+    const data = await res.json();
+    const labels = data.map(d=>d.dest_ip);
+    const counts = data.map(d=>d.packet_count);
+    const ctx = document.getElementById('trafficChart').getContext('2d');
+
+    if(trafficChartInstance) trafficChartInstance.destroy();
+    trafficChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Packet Count',
+                data: counts,
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75,192,192,0.2)',
+                tension: 0.3
+            }]
+        }
+    });
+}
+
+// ---------------- Protocol Chart ----------------
+let protocolChartInstance;
+async function fetchProtocolChart() {
+    const res = await fetch('/api/alltraffic');
+    const data = await res.json();
+    const protocols = {};
+    data.forEach(d=>protocols[d.protocol]=(protocols[d.protocol]||0)+1);
+    const labels = Object.keys(protocols);
+    const values = Object.values(protocols);
+    const ctx = document.getElementById('protocolChart').getContext('2d');
+
+    if(protocolChartInstance) protocolChartInstance.destroy();
+    protocolChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Protocol Count',
+                data: values,
+                backgroundColor: ['#3b82f6','#10b981','#facc15','#a78bfa','#f87171']
+            }]
+        }
+    });
+}
+
+// ---------------- Refresh All ----------------
+async function refreshAll() {
+    await fetchMetrics();
+    await fetchTopSources();
+    await fetchTopDest();
+    await fetchTrafficChart();
+    await fetchProtocolChart();
+}
+
+// أول تشغيل
+refreshAll();
+// تحديث كل 5 ثواني
+setInterval(refreshAll,5000);
+</script>
+</body>
+</html>
